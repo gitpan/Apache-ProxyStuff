@@ -10,7 +10,7 @@ use LWP::UserAgent;
 use Data::Dumper;
 
 @ISA = qw(LWP::UserAgent);
-$VERSION = '0.08';
+$VERSION = '0.09';
 
 my $UA = __PACKAGE__->new;
 $UA->agent(join "/", __PACKAGE__, $VERSION);
@@ -141,6 +141,57 @@ sub process_text {
 
   # Parse the document
   my $parser = new HTML::TokeParser($content);
+
+	# Pre-process the beginning of document so we can appropriately handled bad documents
+  # that are missing the <BODY> tag
+	my ($found_html, @tokens_up_to_html, $found_head, @tokens_up_to_head, $found_body, @tokens);
+	while (my $token = $parser->get_token) {
+		# If it's an open html, save the previous tokens and this one in a seperate array
+		if ($token->[0] eq 'S' and $token->[1] eq 'html') {
+			$found_html++;
+			push @tokens_up_to_html, @tokens, $token;
+			$r->log->debug("HTML Tokens: ", Dumper(@tokens_up_to_html), qq(\n\n));
+			@tokens = ();
+		} # End if
+		# If it's a close head, save the previous tokens and this one in a seperate array
+		elsif ($token->[0] eq 'E' and $token->[1] eq 'head') {
+			$found_head++;
+			push @tokens_up_to_head, @tokens, $token;
+			$r->log->debug("</HEAD> Tokens: ", Dumper(@tokens_up_to_head), qq(\n\n));
+			@tokens = ();
+		} # End if
+		# If it's an open body, add this one and the remaining to the tokens we've seen and quit
+		elsif ($token->[0] eq 'S' and $token->[1] eq 'body') {
+			$found_body++;
+			push @tokens, $token;
+			push @tokens, $token while $token = $parser->get_token;
+			last;
+		} # # End if
+		# Otherwise just save up the tokens
+		else {push @tokens, $token}
+	} # End while
+
+	# Build our body tag in case we need it
+	my $body_tag = ['S', 'body', {}, [], '<body>'];
+
+	# Rebuild the master array of tokens
+	# If we found <body> just make one big of array of the tokens we saved
+	my @all_tokens;
+	if ($found_body) {@all_tokens = (@tokens_up_to_html, @tokens_up_to_head, @tokens)}
+	
+	# If we found </head> but no <body> add <body> after the </head>
+	elsif ($found_head) {@all_tokens =  (@tokens_up_to_html, @tokens_up_to_head, $body_tag, @tokens)}
+
+	# If we found <html> but no <body> and no </head> add <body> after <html>
+	elsif ($found_html) {@all_tokens = (@tokens_up_to_html, $body_tag, @tokens)}
+
+	# We didn't find <body>, </head> and <html> so add <body> to the beginning
+	else {@all_tokens = ($body_tag, @tokens)}
+	
+	# Put them back on the parser
+	$parser->unget_token(@all_tokens);
+		
+	# Now actually process the document
   my ($saw_header, $saw_footer); # We need these for broken docs that have multiple <BODY></BODY> tags
   while (my $token = $parser->get_token) {
 
@@ -150,7 +201,7 @@ sub process_text {
 		} # End if
 
 		# Handle <body>
-		if ($token->[0] eq 'S' and $token->[1] eq 'body' and not $saw_header) {
+		elsif ($token->[0] eq 'S' and $token->[1] eq 'body' and not $saw_header) {
 			open_body($token, $r, $header, $body_attributes);
 			$saw_header++;
 	  } # End if
@@ -316,7 +367,7 @@ Apache::ProxyStuff - mod_perl header/footer/proxy module
 
 =head1 DESCRIPTION
 
-Apache::ProxyStuff is module for adding headers and footers to content proxied from other web servers. Rather than sandwiching the content between the header and footer it "stuffs" the header and footer into their correct places in the content -- header after the <BODY> tag and footer before the </BODY> tag. This allows you to give content living on established servers a common look and feel without making changes to the pages.
+Apache::ProxyStuff is module for adding headers and footers to content proxied from other web servers. Rather than sandwiching the content between the header and footer it "stuffs" the header and footer into their correct places in the content -- header after the <BODY> tag and footer before the </BODY> tag. This allows you to give content living on established servers a common look and feel without making changes to the pages. (ProxyStuff will add a <BODY> tag appropriately when the document does not contain one. This allows even syntacticly incorrect pages to have a common header and footer.)
 
 ProxyStuff also allows you to add meta tags to the <HEAD> section, attributes to the <BODY> tag and manipulate links, image refs and form actions as needed.
 
