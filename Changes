@@ -1,5 +1,9 @@
 Revision history for Perl extension Apache::ProxyStuff.
 
+0.10  Sat Oct 21 01:09:00 2000
+  - ProxyStuff now adds a </BODY> tag when the document does not contain one which should result 
+	  in all pages receiving a footer even if they are not syntacticly correct
+
 0.09  Wed Oct 18 23:36:00 2000
   - Fixed a bug that added an additional <HEAD> tag when adding <META> tags
   - ProxyStuff now adds a <BODY> tag when the document does not contain one which
