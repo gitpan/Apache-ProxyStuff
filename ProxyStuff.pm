@@ -10,7 +10,7 @@ use LWP::UserAgent;
 use Data::Dumper;
 
 @ISA = qw(LWP::UserAgent);
-$VERSION = '0.07';
+$VERSION = '0.08';
 
 my $UA = __PACKAGE__->new;
 $UA->agent(join "/", __PACKAGE__, $VERSION);
@@ -348,7 +348,7 @@ MetaDescription allows you to add a description meta tag to the <HEAD> section o
 
 Example: PerlSetVar MetaDescription "ProxyStuff Home Page"
 
-=itme * MetaContent
+=item * MetaContent
 
 MetaContent allows you to add a content meta tag to the <HEAD> section of the requested document.
 
