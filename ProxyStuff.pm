@@ -10,7 +10,7 @@ use LWP::UserAgent;
 use Data::Dumper;
 
 @ISA = qw(LWP::UserAgent);
-$VERSION = '0.05';
+$VERSION = '0.07';
 
 my $UA = __PACKAGE__->new;
 $UA->agent(join "/", __PACKAGE__, $VERSION);
@@ -19,6 +19,31 @@ $UA->agent(join "/", __PACKAGE__, $VERSION);
 sub redirect_ok {return 0}
 
 # Helper Subs
+sub set_headers {
+  my ($req, %headers) = @_;
+  foreach my $header (keys %headers) {
+		next if $header eq 'Connection'; # Don't want to pass Keep-Alive
+		$req->push_header($header => $headers{$header});
+  } # End foreach
+
+  # Set REMOTE_ADDR, REMOTE_HOST, REMOTE_USER
+  $req->push_header('REMOTE_ADDR' => $ENV{'REMOTE_ADDR'});
+  $req->push_header('REMOTE_HOST' => $ENV{'REMOTE_HOST'} || $ENV{'REMOTE_ADDR'});
+  $req->push_header('REMOTE_USER' => $ENV{'REMOTE_USER'});
+  return $req;
+} # End set_headers
+
+sub open_head {
+	my ($token, $r, $meta_description, $meta_content) = @_;
+
+	# Print tag
+	print qq($token->[-1]\n);
+
+  # Print meta tags
+	print $meta_description;
+	print $meta_content;
+} # End open_head()
+
 sub open_body {
   my ($token, $r, $header, $body_attributes) = @_;
   
@@ -27,10 +52,10 @@ sub open_body {
   
   # Replace existing body attributes with new ones if necessary
   if ($body_attributes) {
-	foreach my $pair (split /\s+/, $body_attributes) {
-	  my ($attr, $value) = split /=/, $pair;
-	  $token->[2]->{lc $attr} = $value; # Keys are lowercase
-	} # End foreach
+		foreach my $pair (split /\s+/, $body_attributes) {
+			my ($attr, $value) = split /=/, $pair;
+			$token->[2]->{lc $attr} = $value; # Keys are lowercase
+		} # End foreach
   } # End if
 
   # Print attributes
@@ -60,7 +85,7 @@ sub a_href {
 
   # Modify href
   if ($token->[2]->{'href'} =~ /^\//) { # Modify if absolute URI
-	$token->[2]->{'href'} = qq(/$add_host2href) . $token->[2]->{'href'};
+		$token->[2]->{'href'} = qq(/$add_host2href) . $token->[2]->{'href'};
   } # End unless
     
   # Print attributes
@@ -79,13 +104,13 @@ sub img_src {
     
   # Modify src
   if ($token->[2]->{'src'} =~ /^\//) { # Modify is absolute URI
-	$token->[2]->{'src'} = qq(/$add_host2img_src) . $token->[2]->{'src'};
+		$token->[2]->{'src'} = qq(/$add_host2img_src) . $token->[2]->{'src'};
   } # End unless
   
   # Print attributes
   my $atts = join(' ', map({"$_=$token->[2]->{$_}"} keys %{$token->[2]}));
   print qq( $atts) if $atts;
-    
+	
   # Close tag
   print qq(>);
 } # End a_href()
@@ -98,7 +123,7 @@ sub form_action {
     
   # Modify action
   if ($token->[2]->{'action'} =~ /^\//) { # Modify is absolute URI
-      $token->[2]->{'action'} = qq(/$add_host2form_action) . $token->[2]->{'action'};
+		$token->[2]->{'action'} = qq(/$add_host2form_action) . $token->[2]->{'action'};
   } # End unless
     
   # Print attributes
@@ -111,47 +136,55 @@ sub form_action {
 
 sub process_text {
   
-  my ($content, $r, $header, $footer, $body_attributes, $add_host2href, $add_host2img_src, 
-	  $add_host2form_action) = @_;
+  my ($content, $r, $header, $footer, $meta_description, $meta_content, $body_attributes, 
+			$add_host2href, $add_host2img_src, $add_host2form_action) = @_;
 
   # Parse the document
   my $parser = new HTML::TokeParser($content);
   my ($saw_header, $saw_footer); # We need these for broken docs that have multiple <BODY></BODY> tags
   while (my $token = $parser->get_token) {
 
-      # Handle <body>
-      if ($token->[0] eq 'S' and $token->[1] eq 'body' and not $saw_header) {
-		open_body($token, $r, $header, $body_attributes);
-		$saw_header++;
+		# Handle <head>
+		if ($token->[0] eq 'S' and $token->[1] eq 'head') {
+			open_head($token, $r, $meta_description, $meta_content) if $meta_description or $meta_content;
+		} # End if
+
+		# Handle <body>
+		if ($token->[0] eq 'S' and $token->[1] eq 'body' and not $saw_header) {
+			open_body($token, $r, $header, $body_attributes);
+			$saw_header++;
 	  } # End if
       
-      # Handle </body>
-      elsif ($token->[0] eq 'E' and $token->[1] eq 'body' and not $saw_footer) {
-		close_body($token, $r, $footer);
-		$saw_footer++;
+		# Handle </body>
+		elsif ($token->[0] eq 'E' and $token->[1] eq 'body' and not $saw_footer) {
+			close_body($token, $r, $footer);
+			$saw_footer++;
 	  } # End elsif
       
-      # Handle <A HREF>
-      elsif ($add_host2href and $token->[0] eq 'S' and $token->[1] eq 'a' and
-	     $token->[2]->{'href'}) {a_href($token, $r, $add_host2href)}
+		# Handle <A HREF>
+		elsif ($add_host2href and $token->[0] eq 'S' and $token->[1] eq 'a' and
+					 $token->[2]->{'href'}) {a_href($token, $r, $add_host2href)}
 
-      # Handle <IMG SRC>
-      elsif ($add_host2img_src and $token->[0] eq 'S' and $token->[1] eq 'img' and
-	     $token->[2]->{'src'}) {img_src($token, $r, $add_host2img_src)}
+		# Handle <IMG SRC>
+		elsif ($add_host2img_src and $token->[0] eq 'S' and $token->[1] eq 'img' and
+					 $token->[2]->{'src'}) {img_src($token, $r, $add_host2img_src)}
       
-      # Handle <FORM ACTION>
-      elsif ($add_host2form_action and $token->[0] eq 'S' and 
-	     $token->[1] eq 'form' and $token->[2]->{'action'}) {form_action($token, $r, 
-																		 $add_host2form_action)}
+		# Handle <FORM ACTION>
+		elsif ($add_host2form_action and $token->[0] eq 'S' and 
+					 $token->[1] eq 'form' and $token->[2]->{'action'}) {form_action($token, $r, 
+																																					 $add_host2form_action)}
 	
-      # Handle comments because TokeParser doesn't save the original text for them
-      elsif ($token->[0] eq 'C') {print qq(<!-- $token->[-1] -->)}
-      
-      # Ditto for declarations
-      elsif ($token->[0] eq 'D') {print qq(<!$token->[-1]>)}
-	
-      # Handle everything else
-      else { print $token->[-1]}
+		# Handle comments because TokeParser doesn't save the original text for them
+		elsif ($token->[0] eq 'C') {print qq(<!-- $token->[-1] -->)}
+		
+		# Ditto for declarations
+		elsif ($token->[0] eq 'D') {print qq(<!$token->[-1]>)}
+		
+		# Handle text, I think it's different in newer versions of HTML::TokeParser
+		elsif ($token->[0] eq 'T') {print qq($token->[1])}
+
+		# Handle everything else
+		else { print $token->[-1]}
       
   } # End while
 } # End process_text()
@@ -166,18 +199,15 @@ sub handler {
   my $header_file = $r->dir_config('HeaderFile');
   my $footer_file = $r->dir_config('FooterFile');
   my $proxy_prefix = $r->dir_config('ProxyPrefix');
+	my $meta_description = qq(<META NAME="description" CONTENT=") . $r->dir_config('MetaDescription') .
+                         qq(">\n);
+	my $meta_content = qq(<META NAME="content" CONTENT=") . $r->dir_config('MetaContent') . qq(">\n);
   my $body_attributes = $r->dir_config('BodyAttributes');
   my $strip_host = $r->dir_config('StripHost');
   my $add_host2href = $r->dir_config('AddHost2AHref');
   my $add_host2img_src = $r->dir_config('AddHost2ImgSrc');
   my $add_host2form_action = $r->dir_config('AddHost2FormAction');
 
-  # Get the header and footer
-  my $header_req = new HTTP::Request('GET' => $header_file);
-  my $footer_req = new HTTP::Request('GET' => $footer_file);
-  my $header_res = $UA->request($header_req);
-  my $footer_res = $UA->request($footer_req);
-  
   # Mangle the url for the file as needed
   my ($null, $base, $uri);
   if ($strip_host) {($null, $base, $uri) = split /\//, $r->uri, 3}
@@ -185,21 +215,13 @@ sub handler {
   $uri =~ s/^\///; # Remove leading slashes
   my $file_uri = join '/', $proxy_prefix, $uri;
   $file_uri .= q(?) . $r->args if $r->args;
+  $r->log->debug("URI: $file_uri");
 
   # Build the request
   my $req = new HTTP::Request($r->method => $file_uri);
 
   # Set headers
-  my %headers = $r->headers_in;
-  foreach my $header (keys %headers) {
-      next if $header eq 'Connection';
-      $req->push_header($header => $headers{$header});
-  } # End foreach
-
-  # Set REMOTE_ADDR, REMOTE_HOST and REMOTE_USER
-  $req->push_header('REMOTE_ADDR' => $ENV{'REMOTE_ADDR'});
-  $req->push_header('REMOTE_HOST' => $ENV{'REMOTE_HOST'} || $ENV{'REMOTE_ADDR'});
-  $req->push_header('REMOTE_USER' => $ENV{'REMOTE_USER'});
+  $req = set_headers($req, $r->headers_in);
 
   # Copy POST data, if any
   if ($r->method eq 'POST') {
@@ -213,13 +235,13 @@ sub handler {
   my $res = $UA->request($req);
 
   if ($res->is_redirect) {
-      my $location = $res->header('Location');
-      my ($host) = ($location =~ m!^([^/]+//[^/]+)/!);
-      if ($host eq $proxy_prefix) {
-	  my $hostname = $r->server->server_hostname;
-	  $location =~ s!//([^/]+)/!//$hostname/!;
-	  $res->header('Location' => $location);
-      } # End if
+		my $location = $res->header('Location');
+		my ($host) = ($location =~ m!^([^/]+//[^/]+)/!);
+		if ($host eq $proxy_prefix) {
+			my $hostname = $r->server->server_hostname;
+			$location =~ s!//([^/]+)/!//$hostname/!;
+			$res->header('Location' => $location);
+		} # End if
   } # End if
 
   # Handle all other headers
@@ -243,12 +265,26 @@ sub handler {
   # If it's text
   if ($r->content_type =~ /^text/) {
 
-	# Adjust the content length to include the lenght of the header and footer
-	my $length = length($header_res->content) + length($footer_res->content) + length($res->content);
-	$r->header_out('Content-length' => $length);
-	$r->send_http_header;
-	process_text($content, $r, $header_res->content, $footer_res->content, $body_attributes, 
-				 $add_host2href, $add_host2img_src, $add_host2form_action);
+		# Get the header and footer
+		my $header_req = new HTTP::Request('GET' => $header_file);
+		my $footer_req = new HTTP::Request('GET' => $footer_file);
+		$header_req = set_headers($header_req, $r->headers_in);
+		$footer_req = set_headers($footer_req, $r->headers_in);
+		$header_req->push_header('REAL_URI' => $file_uri); # Somebody might need the real page
+		$footer_req->push_header('REAL_URI' => $file_uri); # Ditto
+		$header_req->push_header('ORIG_URI' => $r->uri); # Somebody might need the real page
+		$footer_req->push_header('ORIG_URI' => $r->uri); # Ditto
+		my $header_res = $UA->request($header_req);
+		my $footer_res = $UA->request($footer_req);
+
+		# Adjust the content length to include the lenght of the header and footer
+		my $length = length($header_res->content) + length($footer_res->content) + length($res->content) +
+			length($body_attributes) + length($meta_description) + length($meta_content);
+		$r->header_out('Content-length' => $length);
+		$r->send_http_header;
+		process_text($content, $r, $header_res->content, $footer_res->content, $meta_description, 
+								 $meta_content, $body_attributes, $add_host2href, $add_host2img_src, 
+								 $add_host2form_action);
   } # End if
   
   else {$r->send_http_header; print $$content}
@@ -272,16 +308,17 @@ Apache::ProxyStuff - mod_perl header/footer/proxy module
    PerlHandler     Apache::ProxyStuff
    PerlSetVar      HeaderFile      http://www.bar.com:81/includes/header.html
    PerlSetVar      FooterFile      http://www.bar.com:81/includes/footer.html
+   PerlSetVar      MetaDescription "some description"
+   PetlSetVar      MetaContent     "some content""
    PerlSetVar      BodyAttributes  "TOPMARGIN=0 LEFTMARGIN=0 MARGINHEIGHT=0 MARGINWIDTH=0"
-   PerlSetVar      ProxyPrefix http://www.foo.com
+   PerlSetVar      ProxyPrefix     http://www.foo.com
   </Location>
-
 
 =head1 DESCRIPTION
 
 Apache::ProxyStuff is module for adding headers and footers to content proxied from other web servers. Rather than sandwiching the content between the header and footer it "stuffs" the header and footer into their correct places in the content -- header after the <BODY> tag and footer before the </BODY> tag. This allows you to give content living on established servers a common look and feel without making changes to the pages.
 
-ProxyStuff also allows you to add attributes to the <BODY> tag and manipulate links, image refs and form actions as needed.
+ProxyStuff also allows you to add meta tags to the <HEAD> section, attributes to the <BODY> tag and manipulate links, image refs and form actions as needed.
 
 =head1 PARAMETERS
 
@@ -304,6 +341,18 @@ Example: PerlSetVar FooterFile http://www.bar.com/includes/footer.html
 ProxyPrefix specifies a URL which will be prepended to the URI of the request. The new URL is the location of the content to be proxied. If /proxy/content.html is requested and ProxyPrefix is set to http://www.foo.com, the content will be proxied from http://www.foo.com/proxy/content.html.
 
 Example: PerlSetVar ProxyPrefix http://www.foo.com
+
+=item * MetaDescription
+
+MetaDescription allows you to add a description meta tag to the <HEAD> section of the requested document.
+
+Example: PerlSetVar MetaDescription "ProxyStuff Home Page"
+
+=itme * MetaContent
+
+MetaContent allows you to add a content meta tag to the <HEAD> section of the requested document.
+
+Example: PerlSetVar MetaContent "Apache, mod_perl, proxying"
 
 =item * BodyAttributes
 
@@ -334,14 +383,6 @@ Example: PerlSetVar AddHost2Href foo
 =head1 PREREQUISITES
 
 Apache::ProxyStuff requires mod_perl, LWP and HTML::TokeParser.
-
-=head1 TODO
-
-=over 4
-
-=item * Switch to the XS version of HTML::TokeParser.
-
-=over back
 
 =head1 AUTHOR
 
